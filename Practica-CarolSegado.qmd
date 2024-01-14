@@ -1,0 +1,487 @@
+---
+format: html
+editor: visual
+markdown: 
+  wrap: 72
+---
+
+Vasmos a cargar el dataset de AirBnB descargado de [aquí](https://public.opendatasoft.com/explore/dataset/airbnb-listings/export/?disjunctive.host_verifications&disjunctive.amenities&disjunctive.features&q=Madrid&dataChart=eyJxdWVyaWVzIjpbeyJjaGFydHMiOlt7InR5cGUiOiJjb2x1bW4iLCJmdW5jIjoiQ09VTlQiLCJ5QXhpcyI6Imhvc3RfbGlzdGluZ3NfY291bnQiLCJzY2llbnRpZmljRGlzcGxheSI6dHJ1ZSwiY29sb3IiOiJyYW5nZS1jdXN0b20ifV0sInhBeGlzIjoiY2l0eSIsIm1heHBvaW50cyI6IiIsInRpbWVzY2FsZSI6IiIsInNvcnQiOiIiLCJzZXJpZXNCcmVha2Rvd24iOiJyb29tX3R5cGUiLCJjb25maWciOnsiZGF0YXNldCI6ImFpcmJuYi1saXN0aW5ncyIsIm9wdGlvbnMiOnsiZGlzanVuY3RpdmUuaG9zdF92ZXJpZmljYXRpb25zIjp0cnVlLCJkaXNqdW5jdGl2ZS5hbWVuaXRpZXMiOnRydWUsImRpc2p1bmN0aXZlLmZlYXR1cmVzIjp0cnVlfX19XSwidGltZXNjYWxlIjoiIiwiZGlzcGxheUxlZ2VuZCI6dHJ1ZSwiYWxpZ25Nb250aCI6dHJ1ZX0%3D&location=16,41.38377,2.15774&basemap=jawg.streets)
+
+![](descargar.png)
+
+```{r}
+airbnb<-read.csv('airbnb-listings.csv',sep = ';')
+options(repr.plot.height=4,repr.plot.width=6,repr.plot.res = 300)
+```
+
+1.  Vamos a quedarnos con las columnas de mayor interés: 'City','Room.Type','Neighbourhood','Accommodates','Bathrooms','Bedrooms','Beds','Price','Square.Feet','Guests.Included','Extra.People','Review.Scores.Rating','Latitude', 'Longitude' Nos quedarmos solo con las entradas de Madrid para Room.Type=="Entire home/apt" y cuyo barrio (Neighbourhood) no está vacio '' Podemos eliminar las siguientes columnas que ya no son necesarias: "Room.Type",'City' Llama a nuevo dataframe df_madrid.
+
+```{r}
+
+df_madrid <- airbnb[, c('City', 'Room.Type', 'Neighbourhood', 'Accommodates', 'Bathrooms', 'Bedrooms', 'Beds', 'Price', 'Square.Feet', 'Guests.Included',  'Extra.People', 'Review.Scores.Rating', 'Latitude', 'Longitude')]
+
+df_madrid <- df_madrid[grepl("Madrid", df_madrid$City, ignore.case = TRUE) & df_madrid$Room.Type == "Entire home/apt" & df_madrid$Neighbourhood != "", ]
+
+
+
+df_madrid <- df_madrid[, !(names(df_madrid) %in% c("Room.Type", "City"))]
+
+
+
+
+
+```
+
+------------------------------------------------------------------------
+
+2.  Crea una nueva columna llamada Square.Meters a partir de Square.Feet. Recuerda que un pie cuadrado son 0.092903 metros cuadrados.
+
+```{r}
+
+df_madrid$ Square.Meters <- df_madrid$Square.Feet * 0.092903
+
+
+```
+
+```{r}
+head(df_madrid)
+```
+
+------------------------------------------------------------------------
+
+3.  ¿Que porcentaje de los apartamentos no muestran los metros cuadrados? Es decir, ¿cuantos tienen NA en Square.Meters?
+
+```{r}
+
+cantidad_registros <- nrow(df_madrid)
+cat("Cantidad de apartamentos:", cantidad_registros, "\n\n")
+
+sin_metros <- length(df_madrid$Square.Meters[df_madrid$Square.Meters == 'NA'])
+cat("Cantidad de registros sin metros", sin_metros,"\n\n")
+porcentaje <- sin_metros/cantidad_registros *100
+cat("Porcentaje sin metros", round(porcentaje, 2),"%","\n\n")
+#sin_metros
+
+```
+
+------------------------------------------------------------------------
+
+4.  De todos los apartamentos que tienen un valor de metros cuadrados diferente de NA ¿Que porcentaje de los apartamentos tienen 0 metros cuadrados?
+
+```{r}
+
+sin_na <- cantidad_registros - sin_metros
+cat("Cantidad de apartamentos sin na:", sin_na, "\n\n")
+
+
+zero_metros <- sum(!is.na(df_madrid$Square.Meters) & df_madrid$Square.Meters == 0)
+cat("Cantidad de apartamentos con 0 metros:", zero_metros, "\n\n")
+
+porcentaje_zero_metros <- zero_metros/sin_na *100
+cat("Porcentaje con 0 metros", round(porcentaje_zero_metros, 2),"%","\n\n")
+
+
+```
+
+------------------------------------------------------------------------
+
+5.  Reemplazar todos los 0m\^2 por NA
+
+```{r}
+df_madrid$Square.Meters <- gsub(0, NA, df_madrid$Square.Meters)
+
+
+
+df_madrid$Square.Meters
+```
+
+------------------------------------------------------------------------
+
+Hay muchos NAs, vamos a intentar crear un modelo que nos prediga cuantos son los metros cuadrados en función del resto de variables para tratar de rellenar esos NA. Pero **antes de crear el modelo** vamos a hacer: \* pintar el histograma de los metros cuadrados y ver si tenemos que filtrar algún elemento más. \* crear una variable sintética nueva basada en la similitud entre barrios que usaremos en nuestro modelo.
+
+6.  Pinta el histograma de los metros cuadrados y ver si tenemos que filtrar algún elemento más
+
+```{r}
+
+library(ggplot2)
+df_madrid$Square.Meters <- as.numeric(df_madrid$Square.Meters)
+ggplot(df_madrid, aes(x = Square.Meters)) +
+geom_histogram(binwidth = 2, fill = "blue", color = "black", alpha = 0.5) +
+theme_minimal() +
+labs(title = "Histograma de Square.Meters", x = "Square.Meters", y = "Frecuencia")
+
+```
+
+Viendo el histograma veo que hay algun piso de más de 150 metros que, al ser tan reducida la muestra, podría dar problemas, así que les ponemos NA.
+
+```{r}
+df_madrid$Square.Meters[as.numeric(df_madrid$Square.Meters) >= 150] <- NA
+
+```
+
+------------------------------------------------------------------------
+
+7.  Asigna el valor NA a la columna Square.Meters de los apartamentos que tengan menos de 20 m\^2
+
+```{r}
+df_madrid$Square.Meters <- ifelse(df_madrid$Square.Meters<20, NA, df_madrid$Square.Meters)
+
+```
+
+```{r}
+
+library(ggplot2)
+df_madrid$Square.Meters <- as.numeric(df_madrid$Square.Meters)
+ggplot(df_madrid, aes(x = Square.Meters)) +
+geom_histogram(binwidth = 5, fill = "blue", color = "black", alpha = 0.5) +
+theme_minimal() +
+labs(title = "Histograma de Square.Meters", x = "Square.Meters", y = "Frecuencia")
+
+
+
+```
+
+------------------------------------------------------------------------
+
+8.  Existen varios Barrios que todas sus entradas de Square.Meters son NA, vamos a eliminar del dataset todos los pisos que pertenecen a estos barrios.
+
+```{r}
+library(dplyr)
+
+
+conteo_total <- summarise(group_by(df_madrid, Neighbourhood), conteo_total = n())
+
+conteo_con_na <- summarise(group_by(df_madrid, Neighbourhood), conteo_con_na = sum(is.na(Square.Meters)))
+
+conteo_combinado <- left_join(conteo_total, conteo_con_na, by = "Neighbourhood")
+
+barrios_a_excluir <- conteo_combinado$Neighbourhood[conteo_combinado$conteo_total == conteo_combinado$conteo_con_na]
+
+df_madrid <- filter(df_madrid, !(Neighbourhood %in% barrios_a_excluir))
+```
+
+------------------------------------------------------------------------
+
+El barrio parece ser un indicador importante para los metros cuadrados de un apartamento.
+
+Vamos a agrupar los barrios por metros cuadrados. Podemos usar una matriz de similaridad de Tukey tal y como hicimos en el curso de estadística:
+
+```{r}
+tky<-TukeyHSD(aov( formula=Square.Meters~Neighbourhood, data=df_madrid ))
+tky.result<-data.frame(tky$Neighbourhood)
+cn <-sort(unique(df_madrid$Neighbourhood))
+resm <- matrix(NA, length(cn),length(cn))
+rownames(resm) <- cn
+colnames(resm) <- cn
+resm[lower.tri(resm) ] <- round(tky.result$p.adj,4)
+resm[upper.tri(resm) ] <- t(resm)[upper.tri(resm)] 
+diag(resm) <- 1
+library(ggplot2)
+library(reshape2)
+dfResm <- melt(resm)
+ggplot(dfResm, aes(x=Var1, y=Var2, fill=value))+geom_tile(colour = "black")+
+  scale_fill_gradient(low = "white",high = "steelblue")+
+  ylab("Class")+xlab("Class")+theme_bw()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),legend.position="none")
+```
+
+9.  Usando como variable de distancia: 1-resm Dibuja un dendrograma de los diferentes barrios.
+
+```{r}
+library(ggplot2)
+library(reshape2)
+library(dendextend)
+
+
+dist <- as.dist(1 - resm)
+str(dist)
+```
+
+```{r}
+
+hc <- hclust(dist, method = "complete")  
+hcd <-as.dendrogram(hc)
+par(cex=0.7)
+plot(hcd)
+
+```
+
+------------------------------------------------------------------------
+
+10. ¿Que punto de corte sería el aconsejable?, ¿cuantos clusters aparecen?
+
+Le pondría como punto de corte por debajo de 0,5 para aparezcan 3 clusters, he dudado en poner el punto de corte para obtener solo 2 clusters, pero viendo el histograma de metros cuadrados, la matriz de similarizad donde se ve que las muestras son bastante diferentes, y que la distancia en que se unen esos 3 para formar 2 me parece mucha, creo que si pongo menos clusters habrá muestras muy distintas entre sí dento de cada cluster por eso he decidido dejarlo en 3.
+
+```{r}
+options(repr.plot.height=8,repr.plot.width=8,repr.plot.res = 300)
+hcd<-set(hcd,"labels_cex", 0.45) 
+plot(color_branches(hcd,h=0.4),horiz=TRUE,cex=0)
+abline(v=0.4,col="red")
+```
+
+------------------------------------------------------------------------
+
+11. Vamos a crear una nueva columna en el dataframe df_madrid con un nuevo identificador marcado por los clusters obtenidos. Esta columna la llamaremos neighb_id
+
+```{r}
+
+library(dplyr)
+clusters <- data.frame(Neighbourhood=rownames(resm), cluster=cutree(hc, k=3))
+
+df_madrid <- merge(df_madrid, clusters, by="Neighbourhood")
+df_madrid$neighb_id <- df_madrid$cluster
+df_madrid <- df_madrid[, !(names(df_madrid) %in% c("cluster"))]
+
+
+```
+
+```{r}
+summary(df_madrid)
+```
+
+------------------------------------------------------------------------
+
+12. Vamos a crear dos grupos, uno test y otro train.
+
+```{r}
+
+set.seed(123)
+idx <- sample(1:nrow(df_madrid),nrow(df_madrid)*0.7) 
+df_train <- df_madrid[idx, ]
+df_test <- df_madrid[-idx, ]
+
+
+```
+
+```{r}
+summary(df_train)
+```
+
+------------------------------------------------------------------------
+
+13. Tratamos de predecir los metros cuadrados en función del resto de columnas del dataframe.
+
+```{r}
+variables <- df_madrid[, c("Square.Meters","Accommodates", "Bathrooms", "Bedrooms", "Price","Beds","Guests.Included","Extra.People","Review.Scores.Rating", "Latitude","Longitude", "neighb_id")]
+correlacion <- cor(variables,use="pairwise.complete.obs")
+
+print(correlacion)
+
+
+```
+
+El modelo no parece malo ya que tiene un p-valor bajo y el R cuadrado es alto, teniendo en cuenta que no hemos visto correlaciones excesivamente altas, parece bueno.
+
+```{r}
+model <- lm(Square.Meters ~ Accommodates + Bathrooms + Bedrooms  + Price + Beds +Guests.Included + Extra.People  + neighb_id   , data = df_train)
+
+summary(model)
+```
+
+------------------------------------------------------------------------
+
+14. Mirad el histograma de los residuos sobre el conjunto de test para evaluar la calidad de vuestro modelo
+
+Según este histograma la mayor parte de las veces se está equivocando entre -30 y 30 metros cuadrados, en pisos no demasiado grandes puede suponer un problema, si miramos la gráfica del valor absoluto de los residuos, vemos que le modelo tiene más problemas para predecir cuando los metros cuadrados son inferiores a 50 o superiores a 75, si volvemos al histograma de metros cuadrados que hicimos para esos tramos hay menos muestras. Si miramos el R-cuadrado es alto pero no en exceso, el RMSE y el MAE no son malos, por lo que el modelo creo que puede mejorar ampliando el número de muestras.
+
+```{r}
+df_test <- na.omit(df_test)
+
+```
+
+```{r}
+myrsquared<-function(Y,est_Y){
+  Rsq <- 1-(sum((Y-est_Y)^2))/(sum((Y-mean(Y))^2))
+  return(Rsq)
+}
+```
+
+```{r}
+
+df_test$Square.Meters_est<-predict(model,df_test)
+
+
+hist(residuals(model,newdata=df_test))
+plot(df_train$Square.Meters,df_train$Square.Meters-predict(model,df_train))
+plot(df_test$Square.Meters,df_test$Square.Meters-predict(model,df_test))
+paste("MSE:", sqrt(mean((df_test$Square.Meters-df_test$Square.Meters_est)^2)))
+paste("R^2:", myrsquared(df_test$Square.Meters,df_test$Square.Meters_est))
+caret::postResample(pred=df_test$Square.Meters_est, obs= df_test$Square.Meters)
+qqnorm(df_test$Square.Meters-df_test$Square.Meters_est)
+qqline(df_test$Square.Meters-df_test$Square.Meters_est, col = 'orange', lwd =2)
+
+
+```
+
+------------------------------------------------------------------------
+
+15. Si tuvieramos un anuncio de un apartamento para 6 personas (Accommodates), con 1 baño, con un precio de 80€/noche y 3 habitaciones en el barrio de Sol, con 3 camas y un review de 80. ¿Cuantos metros cuadrados tendría? Si tu modelo necesita algúna variable adicional puedes inventartela dentro del rango de valores del dataset. ¿Como varía sus metros cuadrados con cada habitación adicional?
+
+```{r}
+new_data <- data.frame(
+  Accommodates = 6,
+  Bathrooms = 1,
+  Bedrooms = 3,
+  Beds = 3,
+  Price = 80,
+  Extra.People = 0,  
+  Review.Scores.Rating = 80,  
+  Neighbourhood = "Sol",
+  Guests.Included = 0,
+  Latitude = 0,
+  Longitude = 0
+
+)
+
+
+new_data <- merge(new_data, clusters, by = "Neighbourhood", all.x = TRUE)
+new_data$neighb_id <- as.numeric(new_data$cluster)
+
+
+predicted_square_meters <- predict(model, new_data)
+
+cat("Los metros cuadrados estimados para esta entrada serían:", round(predicted_square_meters,2),"\n\n")
+
+
+```
+
+------------------------------------------------------------------------
+
+16. Rellenar los Square.Meters con valor NA con el estimado con el modelo anterior.
+
+```{r}
+
+df_madrid_NA <- df_madrid[is.na(df_madrid$Square.Meters),]
+
+sin_metros <- length(df_madrid$Square.Meters[df_madrid$Square.Meters == 'NA'])
+cat("Cantidad de registros sin metros", sin_metros,"\n\n")
+
+```
+
+```{r}
+
+df_madrid_NA$Square.Meters_est <- predict(model,df_madrid_NA)
+
+sin_metros2 <- length(df_madrid_NA$Square.Meters_est[df_madrid_NA$Square.Meters_est == 'NA'])
+cat("Cantidad de registros sin metros", sin_metros2,"\n\n")
+
+```
+
+```{r}
+df_madrid$Square.Meters[is.na(df_madrid$Square.Meters)] <- df_madrid_NA$Square.Meters_est
+
+```
+
+```{r}
+summary(df_madrid)
+
+```
+
+------------------------------------------------------------------------
+
+17. Usar PCA para encontrar el apartamento más cercano a uno dado. Este algoritmo nos ayudaría a dado un apartamento que el algoritmo nos devolvería los 5 apartamentos más similares.
+
+Crearemos una función tal que le pasemos un apartamento con los siguientes datos: \* Accommodates \* Bathrooms \* Bedrooms \* Beds \* Price \* Guests.Included \* Extra.People \* Review.Scores.Rating \* Latitude \* Longitude \* Square.Meters
+
+y nos devuelva los 5 más similares de:
+
+Este ejercicio me ha costado bastante, he ido implementando con lo que hemos visto en las sesiones, he llegado hasta el punto de mostrar las 5 distancias mas cercanas al nuevo piso dado, porque me ha costado bastante entender lo que estaba haciendo, creo que si hubiera creado una funcion con todas las variables habría podido cruzar los datos el resultado de KNN para obtener los 5 registros completos, no solo imprimir las distancias, pero no me ha dado tiempo de terminarlo.
+
+Lo que he podido hacer es lo siguiente:
+
+Añado datos de un nuevo apartamento, he cogido los datos del mismo dataset
+
+```{r}
+library(MASS)
+library(dplyr)
+
+
+
+new_ap <- data.frame(
+  Accommodates = 4,
+  Bathrooms = 2,
+  Bedrooms = 2,
+  Beds = 3,
+  Price = 90,
+  Extra.People = 20,  
+  Review.Scores.Rating = 88,  
+  Guests.Included = 2,
+  Latitude = 40413658899207700,
+  Longitude = -37064306943918500,
+  Square.Meters = 70
+
+)
+
+
+df_madrid_clean <- na.omit(df_madrid)
+
+df_madrid_clean <- mutate_at(df_madrid_clean, vars(-Neighbourhood), as.numeric)
+
+
+df_madrid_matrix <- df_madrid_clean[, c("Accommodates", "Bathrooms", "Bedrooms", "Beds", "Price", "Guests.Included", "Extra.People", "Review.Scores.Rating", "Latitude", "Longitude", "Square.Meters")]
+
+pca_model <- prcomp(df_madrid_matrix, center = TRUE, scale. = TRUE)
+
+new_ap_matrix <- rbind(new_ap, c(new_ap$Accommodates, new_ap$Bathrooms, new_ap$Bedrooms, new_ap$Beds, new_ap$Price, new_ap$Guests.Included, new_ap$Extra.People, new_ap$Review.Scores.Rating, new_ap$Latitude, new_ap$Longitude, new_ap$Square.Meters))
+
+new_ap_escaled <- scale(new_ap_matrix, center = pca_model$center, scale = pca_model$scale)
+
+
+
+
+new_ap_pred <- predict(pca_model, new_ap_escaled)
+
+
+
+
+str(pca_model)
+
+```
+
+
+
+Para ver cuántos componentes seleccionar grafico el acumulado de los autovalores y me quedo con 6
+
+```{r}
+plot(cumsum(pca_model$sdev^2/sum(pca_model$sdev^2)),main="Autovalores")
+grid()
+```
+
+Mediante KNN
+
+```{r}
+
+number_of_pca_components <- 6
+knn <- 5
+
+result <- data.frame(real = rownames(df_madrid_matrix), pred = NA)
+Apc <- pca_model$x[, 1:number_of_pca_components]
+
+for (id_test_pic in 1:nrow(new_ap_matrix)) {
+
+    orig_pic <- new_ap_matrix[id_test_pic, ]
+
+    t_pic <- predict(pca_model, orig_pic)[, 1:number_of_pca_components]
+    t_pic <- matrix(t_pic, nrow = 1)
+
+    distances <- rowSums((t_pic[rep(1, times = nrow(Apc)), ] - Apc)^2)
+
+    knn_indices <- order(distances, decreasing = FALSE)[1:knn]
+    knn_tags <- rownames(df_madrid_matrix)[knn_indices]
+
+    most_common_name <- names(which.max(table(knn_tags)))
+
+    result$pred[id_test_pic] <- most_common_name
+}
+
+```
+
+```{r}
+similar_apartments <- data.frame(real = rownames(df_madrid_matrix)[knn_indices],
+                                       pred = knn_tags,
+                                       distance = distances[knn_indices])
+
+print(similar_apartments)
+```
+
+------------------------------------------------------------------------
